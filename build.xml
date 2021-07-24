@@ -11,26 +11,23 @@
 ** Call "ant help" to get possible build targets.
 **
 -->
-<project name="myPluginName" default="dist" basedir=".">
+<project name="drawSidewalks" default="dist" basedir=".">
 
     <!-- enter the SVN commit message -->
-    <property name="commit.message" value="Commit message"/>
+    <property name="commit.message" value="Draw Sidewalks"/>
     <!-- enter the *lowest* JOSM version this plugin is currently compatible with -->
-    <property name="plugin.main.version" value="10580"/>
+    <property name="plugin.main.version" value="18004"/>
 
     <!-- Configure these properties (replace "..." accordingly).
          See https://josm.openstreetmap.de/wiki/DevelopersGuide/DevelopingPlugins
     -->
-    <property name="plugin.author" value="..."/>
-    <property name="plugin.class" value="..."/>
-    <property name="plugin.description" value="..."/>
-    <property name="plugin.icon" value="..."/>
-    <property name="plugin.link" value="..."/>
-    <!--<property name="plugin.early" value="..."/>-->
-    <!--<property name="plugin.requires" value="..."/>-->
-    <!--<property name="plugin.stage" value="..."/>-->
+    <property name="plugin.author" value="jyasskin"/>
+    <property name="plugin.class" value="info.yasskin.jeffrey.josm.drawsidewalks.DrawSidewalks"/>
+    <property name="plugin.description" value="A tool to separate sidewalks from roads."/>
+    <property name="plugin.icon" value="images/icon.png"/>
+    <property name="plugin.link" value="https://github.com/jyasskin/sidewalk-utils"/>
+    <property name="plugin.canloadatruntime" value="true"/>
 
     <!-- ** include targets that all plugins have in common ** -->
     <import file="../build-common.xml"/>
-  
 </project>

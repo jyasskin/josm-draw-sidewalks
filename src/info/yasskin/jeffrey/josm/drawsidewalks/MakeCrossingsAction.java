@@ -117,60 +117,64 @@ public class MakeCrossingsAction extends JosmAction {
   }
 
   void setSplitWayTags(SplitWayCommand splitCommand, Set<Node> intersections, Consumer<Command> commands) {
+    // The original way was repurposed into one of the split ways.
+    setOneSplitWayTags(splitCommand.getOriginalWay(), intersections, commands);
+    // Do the rest of the split ways.
     for (Way splitWay : splitCommand.getNewWays()) {
-      // FIXME: Also run for the original way.
-
-      Map<String, String> splitWayTagChanges = new HashMap<>();
-      splitWayTagChanges.put("highway", "footway");
-      List<Node> crossings = splitWay.getNodes().stream().filter(intersections::contains).collect(Collectors.toList());
-      if (crossings.isEmpty()) {
-        // It's a sidewalk.
-        splitWayTagChanges.put("footway", "sidewalk");
-      } else {
-        // It's a crossing.
-        splitWayTagChanges.put("footway", "crossing");
-        getOnly(crossings).ifPresent(crossingNode -> {
-          // Copy some tags from the crossing node to the crossing way. If
-          // there's more than one crossing, it's less clear what to do, so we
-          // leave the way alone.
-
-          // `tactile_paving=yes` means both kerbs have tactile paving, but =no doesn't
-          // reliably mean that neither has it.
-          if (crossingNode.hasTag("tactile_paving", "yes")) {
-            // The overall way might begin or end at this crossing, in which case it's not
-            // actually a kerb. But in that case it also doesn't hurt to set
-            // tactile_paving=yes redundantly.
-            commands.accept(new ChangePropertyCommand(Arrays.asList(splitWay.firstNode(), splitWay.lastNode()),
-              "tactile_paving", "yes"));
-          }
-
-          // The kind of crossing, and whether it has an island, are shared between the
-          // node and the way.
-          copyTag(crossingNode, "crossing", splitWayTagChanges);
-          copyTag(crossingNode, "crossing:island", splitWayTagChanges);
-        });
-
-        // Set the crossing's surface if all intersecting ways agree on the same
-        // surface. Clear it otherwise.
-        Logging.debug("Finding intersecting surfaces for {0}", splitWay);
-        Set<Way> intersectingWays = new HashSet<>(crossings.size() + 1);
-        crossings.forEach(crossing -> intersectingWays.addAll(crossing.getParentWays()));
-        intersectingWays.remove(splitCommand.getOriginalWay());
-        intersectingWays.remove(splitWay);
-        Logging.debug("Intersecting ways: {0}", intersectingWays);
-        Set<String> surfaces = intersectingWays.stream().map(way -> way.get("surface")).collect(Collectors.toSet());
-        Logging.debug("All surfaces {0}", surfaces);
-        Optional<String> surface = getOnly(surfaces);
-        Logging.debug("Picked surface {0}", surface);
-        splitWayTagChanges.put("surface", surface.orElse(null));
-
-        // Clear the smoothness for the crossing, since there's no indication
-        // it'll be similar to either the smoothness of the rest of the sidewalk or the
-        // rest of any of the streets.
-        splitWayTagChanges.put("smoothness", null);
-      }
-      commands.accept(new ChangePropertyCommand(Collections.singleton(splitWay), splitWayTagChanges));
+      setOneSplitWayTags(splitWay, intersections, commands);
     }
+  }
+
+  private void setOneSplitWayTags(Way splitWay, Set<Node> intersections, Consumer<Command> commands) {
+    Map<String, String> splitWayTagChanges = new HashMap<>();
+    splitWayTagChanges.put("highway", "footway");
+    List<Node> crossings = splitWay.getNodes().stream().filter(intersections::contains).collect(Collectors.toList());
+    if (crossings.isEmpty()) {
+      // It's a sidewalk.
+      splitWayTagChanges.put("footway", "sidewalk");
+    } else {
+      // It's a crossing.
+      splitWayTagChanges.put("footway", "crossing");
+      getOnly(crossings).ifPresent(crossingNode -> {
+        // Copy some tags from the crossing node to the crossing way. If
+        // there's more than one crossing, it's less clear what to do, so we
+        // leave the way alone.
+
+        // `tactile_paving=yes` means both kerbs have tactile paving, but =no doesn't
+        // reliably mean that neither has it.
+        if (crossingNode.hasTag("tactile_paving", "yes")) {
+          // The overall way might begin or end at this crossing, in which case it's not
+          // actually a kerb. But in that case it also doesn't hurt to set
+          // tactile_paving=yes redundantly.
+          commands.accept(new ChangePropertyCommand(Arrays.asList(splitWay.firstNode(), splitWay.lastNode()),
+              "tactile_paving", "yes"));
+        }
+
+        // The kind of crossing, and whether it has an island, are shared between the
+        // node and the way.
+        copyTag(crossingNode, "crossing", splitWayTagChanges);
+        copyTag(crossingNode, "crossing:island", splitWayTagChanges);
+      });
+
+      // Set the crossing's surface if all intersecting ways agree on the same
+      // surface. Clear it otherwise.
+      Logging.debug("Finding intersecting surfaces for {0}", splitWay);
+      Set<Way> intersectingWays = new HashSet<>(crossings.size() + 1);
+      crossings.forEach(crossing -> intersectingWays.addAll(crossing.getParentWays()));
+      intersectingWays.remove(splitWay);
+      Logging.debug("Intersecting ways: {0}", intersectingWays);
+      Set<String> surfaces = intersectingWays.stream().map(way -> way.get("surface")).collect(Collectors.toSet());
+      Logging.debug("All surfaces {0}", surfaces);
+      Optional<String> surface = getOnly(surfaces);
+      Logging.debug("Picked surface {0}", surface);
+      splitWayTagChanges.put("surface", surface.orElse(null));
+
+      // Clear the smoothness for the crossing, since there's no indication
+      // it'll be similar to either the smoothness of the rest of the sidewalk or the
+      // rest of any of the streets.
+      splitWayTagChanges.put("smoothness", null);
+    }
+    commands.accept(new ChangePropertyCommand(Collections.singleton(splitWay), splitWayTagChanges));
   }
 
   void copyTag(Tagged source, String key, Map<String, String> dest) {

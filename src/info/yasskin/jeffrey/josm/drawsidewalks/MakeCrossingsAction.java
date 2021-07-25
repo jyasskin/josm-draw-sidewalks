@@ -8,19 +8,20 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.openstreetmap.josm.actions.JosmAction;
 import org.openstreetmap.josm.command.ChangePropertyCommand;
 import org.openstreetmap.josm.command.Command;
-import org.openstreetmap.josm.command.SequenceCommand;
 import org.openstreetmap.josm.command.SplitWayCommand;
-import org.openstreetmap.josm.data.UndoRedoHandler;
 import org.openstreetmap.josm.data.osm.DefaultNameFormatter;
 import org.openstreetmap.josm.data.osm.Node;
 import org.openstreetmap.josm.data.osm.OsmPrimitive;
@@ -71,22 +72,22 @@ public class MakeCrossingsAction extends JosmAction {
     if (!isEnabled()) {
       return;
     }
-    final List<Command> commands = new ArrayList<>();
-    Collection<OsmPrimitive> selection = Objects.requireNonNull(getLayerManager().getEditDataSet()).getSelected();
-    Optional<OsmPrimitive> selected = getOnly(selection);
-    assert selected.isPresent();
-    Way way = (Way) selected.get();
+    try (UndoRedoBuilder commands = new UndoRedoBuilder();) {
+      Collection<OsmPrimitive> selection = Objects.requireNonNull(getLayerManager().getEditDataSet()).getSelected();
+      Optional<OsmPrimitive> selected = getOnly(selection);
+      assert selected.isPresent();
+      Way way = (Way) selected.get();
 
-    final List<Node> kerbs = new ArrayList<>();
-    final Set<Node> intersections = new HashSet<>();
-    findKerbsAroundIntersections(way, kerbs, intersections);
-    Logging.debug("Intersections between way {0}\nand roads: {1}", way, intersections);
-    SplitWayCommand splitCommand = SplitWayCommand.split(way, kerbs, selection);
-    commands.add(splitCommand);
-    commands.add(new ChangePropertyCommand(intersections, "highway", "crossing"));
-    setSplitWayTags(splitCommand, intersections).ifPresent(commands::add);
-    UndoRedoHandler.getInstance().add(SequenceCommand.wrapIfNeeded(
-        tr("Make crossings along sidewalk {0}", way.getDisplayName(DefaultNameFormatter.getInstance())), commands));
+      final List<Node> kerbs = new ArrayList<>();
+      final Set<Node> intersections = new HashSet<>();
+      findKerbsAroundIntersections(way, kerbs, intersections);
+      Logging.debug("Intersections between way {0}\nand roads: {1}", way, intersections);
+      SplitWayCommand splitCommand = SplitWayCommand.split(way, kerbs, selection);
+      commands.add(splitCommand);
+      commands.add(new ChangePropertyCommand(intersections, "highway", "crossing"));
+      setSplitWayTags(splitCommand, intersections, commands::add);
+      commands.commit(tr("Make crossings along sidewalk {0}", way.getDisplayName(DefaultNameFormatter.getInstance())));
+    }
   }
 
   /**
@@ -115,17 +116,19 @@ public class MakeCrossingsAction extends JosmAction {
     }
   }
 
-  Optional<Command> setSplitWayTags(SplitWayCommand splitCommand, Set<Node> intersections) {
-    List<Node> tactilePavingYes = new ArrayList<>();
+  void setSplitWayTags(SplitWayCommand splitCommand, Set<Node> intersections, Consumer<Command> commands) {
     for (Way splitWay : splitCommand.getNewWays()) {
-      splitWay.put("highway", "footway");
+      // FIXME: Also run for the original way.
+
+      Map<String, String> splitWayTagChanges = new HashMap<>();
+      splitWayTagChanges.put("highway", "footway");
       List<Node> crossings = splitWay.getNodes().stream().filter(intersections::contains).collect(Collectors.toList());
       if (crossings.isEmpty()) {
         // It's a sidewalk.
-        splitWay.put("footway", "sidewalk");
+        splitWayTagChanges.put("footway", "sidewalk");
       } else {
         // It's a crossing.
-        splitWay.put("footway", "crossing");
+        splitWayTagChanges.put("footway", "crossing");
         getOnly(crossings).ifPresent(crossingNode -> {
           // Copy some tags from the crossing node to the crossing way. If
           // there's more than one crossing, it's less clear what to do, so we
@@ -137,14 +140,14 @@ public class MakeCrossingsAction extends JosmAction {
             // The overall way might begin or end at this crossing, in which case it's not
             // actually a kerb. But in that case it also doesn't hurt to set
             // tactile_paving=yes redundantly.
-            tactilePavingYes.add(splitWay.firstNode());
-            tactilePavingYes.add(splitWay.lastNode());
+            commands.accept(new ChangePropertyCommand(Arrays.asList(splitWay.firstNode(), splitWay.lastNode()),
+              "tactile_paving", "yes"));
           }
 
           // The kind of crossing, and whether it has an island, are shared between the
           // node and the way.
-          copyTag(crossingNode, "crossing", splitWay);
-          copyTag(crossingNode, "crossing:island", splitWay);
+          copyTag(crossingNode, "crossing", splitWayTagChanges);
+          copyTag(crossingNode, "crossing:island", splitWayTagChanges);
         });
 
         // Set the crossing's surface if all intersecting ways agree on the same
@@ -159,20 +162,18 @@ public class MakeCrossingsAction extends JosmAction {
         Logging.debug("All surfaces {0}", surfaces);
         Optional<String> surface = getOnly(surfaces);
         Logging.debug("Picked surface {0}", surface);
-        splitWay.put("surface", surface.orElse(null));
+        splitWayTagChanges.put("surface", surface.orElse(null));
 
         // Clear the smoothness for the crossing, since there's no indication
         // it'll be similar to either the smoothness of the rest of the sidewalk or the
         // rest of any of the streets.
-        splitWay.remove("smoothness");
+        splitWayTagChanges.put("smoothness", null);
       }
+      commands.accept(new ChangePropertyCommand(Collections.singleton(splitWay), splitWayTagChanges));
     }
-    if (tactilePavingYes.isEmpty())
-      return Optional.empty();
-    return Optional.of(new ChangePropertyCommand(tactilePavingYes, "tactile_paving", "yes"));
   }
 
-  void copyTag(Tagged source, String key, Tagged dest) {
+  void copyTag(Tagged source, String key, Map<String, String> dest) {
     if (source.hasTag(key)) {
       dest.put(key, source.get(key));
     }
